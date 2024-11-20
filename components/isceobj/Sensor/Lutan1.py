@@ -188,15 +188,6 @@ class Lutan1(Sensor):
         '''
         Extract orbit information from the orbit file
         '''
-
-        try:
-            fp = open(self.orbitFile, 'r')
-        except IOError as strerr:
-            print("IOError: %s" % strerr)
-        
-        _xml_root = ET.ElementTree(file=fp).getroot()
-        node = _xml_root.find('Data_Block/List_of_OSVs')
-
         orb = Orbit()
         orb.configure()
 
@@ -205,26 +196,67 @@ class Lutan1(Sensor):
         margin = datetime.timedelta(seconds=1.0)
         tstart = self.frame.getSensingStart() - margin
         tend = self.frame.getSensingStop() + margin
+
+        file_ext = os.path.splitext(self.orbitFile)[1].lower()
         
-        for child in node:
-            timestamp = self.convertToDateTime(child.find('UTC').text)
-            if (timestamp >= tstart) and (timestamp <= tend):
-                pos = []
-                vel = []
-                for tag in ['VX', 'VY', 'VZ']:
-                    vel.append(float(child.find(tag).text))
+        if file_ext == '.xml':
+            try:
+                fp = open(self.orbitFile, 'r')
+            except IOError as strerr:
+                print("IOError: %s" % strerr)
+            
+            _xml_root = ET.ElementTree(file=fp).getroot()
+            node = _xml_root.find('Data_Block/List_of_OSVs')
+            
+            for child in node:
+                timestamp = self.convertToDateTime(child.find('UTC').text)
+                if (timestamp >= tstart) and (timestamp <= tend):
+                    pos = []
+                    vel = []
+                    for tag in ['VX', 'VY', 'VZ']:
+                        vel.append(float(child.find(tag).text))
 
-                for tag in ['X', 'Y', 'Z']:
-                    pos.append(float(child.find(tag).text))
+                    for tag in ['X', 'Y', 'Z']:
+                        pos.append(float(child.find(tag).text))
 
-                vec = StateVector()
-                vec.setTime(timestamp)
-                vec.setPosition(pos)
-                vec.setVelocity(vel)
-                orb.addStateVector(vec)
+                    vec = StateVector()
+                    vec.setTime(timestamp)
+                    vec.setPosition(pos)
+                    vec.setVelocity(vel)
+                    orb.addStateVector(vec)
 
-        fp.close()
+            fp.close()
 
+        elif file_ext == '.txt':
+            with open(self.orbitFile, 'r') as fid:
+                for line in fid:
+                    if not line.startswith('#'):
+                        break
+                
+                for line in fid:
+                    fields = line.split()
+                    if len(fields) >= 13:
+                        year = int(fields[0])
+                        month = int(fields[1])
+                        day = int(fields[2])
+                        hour = int(fields[3])
+                        minute = int(fields[4])
+                        second = float(fields[5])
+
+                        timestamp = datetime.datetime(year, month, day, hour, minute, second)
+
+                        if (timestamp >= tstart) and (timestamp <= tend):
+                            pos = [float(fields[6]), float(fields[7]), float(fields[8])]
+                            vel = [float(fields[9]), float(fields[10]), float(fields[11])]
+
+                            vec = StateVector()
+                            vec.setTime(timestamp)
+                            vec.setPosition(pos)
+                            vec.setVelocity(vel)
+                            orb.addStateVector(vec)
+        else:
+            raise Exception("Unsupported orbit file extension: %s" % file_ext)
+        
         return orb
     
     def extractOrbitFromAnnotation(self):

@@ -193,7 +193,7 @@ class Lutan1(Sensor):
 
         # I based the margin on the data that I have.
         # Lutan-1 position and velocity sampling frequency is 1 Hz
-        margin = datetime.timedelta(seconds=1.0)
+        margin = datetime.timedelta(minutes=30.0) #1.0s
         tstart = self.frame.getSensingStart() - margin
         tend = self.frame.getSensingStop() + margin
 
@@ -242,9 +242,12 @@ class Lutan1(Sensor):
                         hour = int(fields[3])
                         minute = int(fields[4])
                         second = float(fields[5])
-
-                        timestamp = datetime.datetime(year, month, day, hour, minute, second)
-
+                        
+                        int_second = int(second)
+                        microsecond = int((second - int_second) * 1e6)
+                        # Convert to datetime   
+                        timestamp = datetime.datetime(year, month, day, hour, minute, int_second, microsecond)
+                        
                         if (timestamp >= tstart) and (timestamp <= tend):
                             pos = [float(fields[6]), float(fields[7]), float(fields[8])]
                             vel = [float(fields[9]), float(fields[10]), float(fields[11])]
@@ -277,7 +280,7 @@ class Lutan1(Sensor):
 
         frameOrbit = Orbit()
         frameOrbit.setOrbitSource('Header')
-        margin = datetime.timedelta(seconds=1.0)
+        margin = datetime.timedelta(minutes=30.0)
         tstart = self.frame.getSensingStart() - margin
         tend = self.frame.getSensingStop() + margin
 

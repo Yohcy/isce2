@@ -196,6 +196,7 @@ class Lutan1(Sensor):
 
         # I based the margin on the data that I have.
         # Lutan-1 position and velocity sampling frequency is 1 Hz
+<<<<<<< HEAD
         margin = datetime.timedelta(minutes=30.0)
         tstart = self.frame.getSensingStart() - margin
         tend = self.frame.getSensingStop() + margin
@@ -230,6 +231,42 @@ class Lutan1(Sensor):
 
             fp.close()
 
+=======
+        margin = datetime.timedelta(minutes=30.0) #1.0s
+        tstart = self.frame.getSensingStart() - margin
+        tend = self.frame.getSensingStop() + margin
+
+        file_ext = os.path.splitext(self.orbitFile)[1].lower()
+        
+        if file_ext == '.xml':
+            try:
+                fp = open(self.orbitFile, 'r')
+            except IOError as strerr:
+                print("IOError: %s" % strerr)
+            
+            _xml_root = ET.ElementTree(file=fp).getroot()
+            node = _xml_root.find('Data_Block/List_of_OSVs')
+            
+            for child in node:
+                timestamp = self.convertToDateTime(child.find('UTC').text)
+                if (timestamp >= tstart) and (timestamp <= tend):
+                    pos = []
+                    vel = []
+                    for tag in ['VX', 'VY', 'VZ']:
+                        vel.append(float(child.find(tag).text))
+
+                    for tag in ['X', 'Y', 'Z']:
+                        pos.append(float(child.find(tag).text))
+
+                    vec = StateVector()
+                    vec.setTime(timestamp)
+                    vec.setPosition(pos)
+                    vec.setVelocity(vel)
+                    orb.addStateVector(vec)
+
+            fp.close()
+
+>>>>>>> fa1748df79ddd256dd7ad31ddf31b20812d7c841
         elif file_ext == '.txt':
             with open(self.orbitFile, 'r') as fid:
                 for line in fid:
@@ -254,7 +291,11 @@ class Lutan1(Sensor):
                         if (timestamp >= tstart) and (timestamp <= tend):
                             pos = [float(fields[6]), float(fields[7]), float(fields[8])]
                             vel = [float(fields[9]), float(fields[10]), float(fields[11])]
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> fa1748df79ddd256dd7ad31ddf31b20812d7c841
                             vec = StateVector()
                             vec.setTime(timestamp)
                             vec.setPosition(pos)
@@ -262,8 +303,12 @@ class Lutan1(Sensor):
                             orb.addStateVector(vec)
         else:
             raise Exception("Unsupported orbit file extension: %s" % file_ext)
+<<<<<<< HEAD
         sensing_date = self.frame.getSensingStart().strftime("%Y%m%d")
             
+=======
+        
+>>>>>>> fa1748df79ddd256dd7ad31ddf31b20812d7c841
         return orb
     
     # def extractOrbitFromAnnotation(self):

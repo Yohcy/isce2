@@ -22,6 +22,9 @@ from iscesys.DateTimeUtil.DateTimeUtil import DateTimeUtil as DTUtil
 from isceobj.Orbit.OrbitExtender import OrbitExtender
 from osgeo import gdal
 import warnings
+from scipy.interpolate import UnivariateSpline
+from scipy.signal import savgol_filter
+import pdb
 
 lookMap = { 'RIGHT' : -1,
             'LEFT' : 1}
@@ -188,45 +191,182 @@ class Lutan1(Sensor):
         '''
         Extract orbit information from the orbit file
         '''
-
-        try:
-            fp = open(self.orbitFile, 'r')
-        except IOError as strerr:
-            print("IOError: %s" % strerr)
-        
-        _xml_root = ET.ElementTree(file=fp).getroot()
-        node = _xml_root.find('Data_Block/List_of_OSVs')
-
         orb = Orbit()
         orb.configure()
 
         # I based the margin on the data that I have.
         # Lutan-1 position and velocity sampling frequency is 1 Hz
-        margin = datetime.timedelta(seconds=1.0)
+        margin = datetime.timedelta(minutes=30.0)
         tstart = self.frame.getSensingStart() - margin
         tend = self.frame.getSensingStop() + margin
-        
-        for child in node:
-            timestamp = self.convertToDateTime(child.find('UTC').text)
-            if (timestamp >= tstart) and (timestamp <= tend):
-                pos = []
-                vel = []
-                for tag in ['VX', 'VY', 'VZ']:
-                    vel.append(float(child.find(tag).text))
 
-                for tag in ['X', 'Y', 'Z']:
-                    pos.append(float(child.find(tag).text))
+        file_ext = os.path.splitext(self.orbitFile)[1].lower()
 
-                vec = StateVector()
-                vec.setTime(timestamp)
-                vec.setPosition(pos)
-                vec.setVelocity(vel)
-                orb.addStateVector(vec)
+        if file_ext == '.xml':
+            try:
+                fp = open(self.orbitFile, 'r')
+            except IOError as strerr:
+                print("IOError: %s" % strerr)
+            
+            _xml_root = ET.ElementTree(file=fp).getroot()
+            node = _xml_root.find('Data_Block/List_of_OSVs')
+            
+            for child in node:
+                timestamp = self.convertToDateTime(child.find('UTC').text)
+                if (timestamp >= tstart) and (timestamp <= tend):
+                    pos = []
+                    vel = []
+                    for tag in ['VX', 'VY', 'VZ']:
+                        vel.append(float(child.find(tag).text))
 
-        fp.close()
+                    for tag in ['X', 'Y', 'Z']:
+                        pos.append(float(child.find(tag).text))
 
+                    vec = StateVector()
+                    vec.setTime(timestamp)
+                    vec.setPosition(pos)
+                    vec.setVelocity(vel)
+                    orb.addStateVector(vec)
+
+            fp.close()
+
+        elif file_ext == '.txt':
+            with open(self.orbitFile, 'r') as fid:
+                for line in fid:
+                    if not line.startswith('#'):
+                        break
+                
+                for line in fid:
+                    fields = line.split()
+                    if len(fields) >= 13:
+                        year = int(fields[0])
+                        month = int(fields[1])
+                        day = int(fields[2])
+                        hour = int(fields[3])
+                        minute = int(fields[4])
+                        second = float(fields[5])
+                        
+                        int_second = int(second)
+                        microsecond = int((second - int_second) * 1e6)
+                        # Convert to datetime   
+                        timestamp = datetime.datetime(year, month, day, hour, minute, int_second, microsecond)
+                        
+                        if (timestamp >= tstart) and (timestamp <= tend):
+                            pos = [float(fields[6]), float(fields[7]), float(fields[8])]
+                            vel = [float(fields[9]), float(fields[10]), float(fields[11])]
+    
+                            vec = StateVector()
+                            vec.setTime(timestamp)
+                            vec.setPosition(pos)
+                            vec.setVelocity(vel)
+                            orb.addStateVector(vec)
+        else:
+            raise Exception("Unsupported orbit file extension: %s" % file_ext)
+        sensing_date = self.frame.getSensingStart().strftime("%Y%m%d")
+            
         return orb
     
+    # def extractOrbitFromAnnotation(self):
+
+    #     '''
+    #     Extract orbit information from xml annotation
+    #     WARNING! Only use this method if orbit file is not available
+    #     '''
+        
+    #     try:
+    #         fp = open(self.xml, 'r')
+    #     except IOError as strerr:
+    #         print("IOError: %s" % strerr)
+
+    #     _xml_root = ET.ElementTree(file=fp).getroot()
+    #     node = _xml_root.find('platform/orbit')
+    #     countNode = len(list(_xml_root.find('platform/orbit')))
+
+    #     frameOrbit = Orbit()
+    #     frameOrbit.setOrbitSource('Header')
+    #     margin = datetime.timedelta(seconds=1.0)
+    #     #tstart = self.frame.getSensingStart() - margin
+    #     #tend = self.frame.getSensingStop() + margin
+    #     # if self.xml == '../mine/SLC/LT1B_MONO_KRN_STRIP2_000643_E37.4_N37.1_20220411_SLC_HH_L1A_0000010037.meta.xml':
+    #     #     startstring = '2022-04-11T03:33:26.000116'
+    #     #     endstring = '2022-04-11T03:35:29.239314'
+    #     # else:
+    #     #     startstring = '2023-02-10T03:33:07.000000'
+    #     #     endstring = '2023-02-10T03:36:05.000000'
+    #     tstart = datetime.datetime.strptime(startstring,"%Y-%m-%dT%H:%M:%S.%f") - margin
+    #     tend = datetime.datetime.strptime(endstring,"%Y-%m-%dT%H:%M:%S.%f") + margin
+    #     scenetstart = self.frame.getSensingStart() - margin
+    #     scenetend = self.frame.getSensingStop() + margin
+    #     V_temp = []
+    #     P_temp = []
+    #     T_temp = []
+    #     for k in range(1,countNode):
+    #         timestamp = self.convertToDateTime(node.find('stateVec[{}]/timeUTC'.format(k)).text)
+    #         if (timestamp >= tstart) and (timestamp <= tend):
+    #             pos = [float(node.find('stateVec[{}]/posX'.format(k)).text), float(node.find('stateVec[{}]/posY'.format(k)).text), float(node.find('stateVec[{}]/posZ'.format(k)).text)]
+    #             vel = [float(node.find('stateVec[{}]/velX'.format(k)).text), float(node.find('stateVec[{}]/velY'.format(k)).text), float(node.find('stateVec[{}]/velZ'.format(k)).text)]
+    #             V_temp.append(vel)
+    #             P_temp.append(pos)
+    #             T_temp.append(timestamp)
+                
+    #             # vec = StateVector()
+    #             # vec.setTime(timestamp)
+    #             # vec.setPosition(pos)
+    #             # vec.setVelocity(vel)
+    #             # frameOrbit.addStateVector(vec)
+    #     pdb.set_trace()
+    #     time_zero = T_temp[0]
+    #     time_seconds = [(t - time_zero).total_seconds() for t in T_temp]
+
+    #     xpos = [p[0] for p in P_temp]
+    #     ypos = [p[1] for p in P_temp]
+    #     zpos = [p[2] for p in P_temp]
+        
+    #     spline_x = UnivariateSpline(time_seconds, xpos, k=5)
+    #     xpos_smooth = spline_x(time_seconds)
+        
+    #     spline_y = UnivariateSpline(time_seconds, ypos, k=5)
+    #     ypos_smooth = spline_y(time_seconds)
+        
+    #     spline_z = UnivariateSpline(time_seconds, zpos, k=5)
+    #     zpos_smooth = spline_z(time_seconds)
+
+    #     # xpos_smooth = savgol_filter(xpos, window_length=7, polyorder=3)
+    #     # ypos_smooth = savgol_filter(ypos, window_length=7, polyorder=3)
+    #     # zpos_smooth = savgol_filter(zpos, window_length=51, polyorder=4)
+
+    #     pos_smooth = [[float(xpos_smooth[i]), float(ypos_smooth[i]), float(zpos_smooth[i])] for i in range(0, len(xpos_smooth))]
+
+    #     xvel = [v[0] for v in V_temp]
+    #     yvel = [v[1] for v in V_temp]
+    #     zvel = [v[2] for v in V_temp]
+
+    #     spline_x = UnivariateSpline(time_seconds, xvel, k=4)
+    #     xvel_smooth = spline_x(time_seconds)
+
+    #     spline_y = UnivariateSpline(time_seconds, yvel, k=4)
+    #     yvel_smooth = spline_y(time_seconds)
+
+    #     spline_z = UnivariateSpline(time_seconds, zvel, k=4)
+    #     zvel_smooth = spline_z(time_seconds)
+
+    #     # xvel_smooth = savgol_filter(xvel, window_length=21, polyorder=4)
+    #     # yvel_smooth = savgol_filter(yvel, window_length=21, polyorder=4)
+    #     # zvel_smooth = savgol_filter(zvel, window_length=21, polyorder=4)
+        
+    #     vel_smooth = [[float(xvel_smooth[i]), float(yvel_smooth[i]), float(zvel_smooth[i])] for i in range(0, len(xvel_smooth))]
+        
+    #     for i in range(0, len(time_seconds) - 1):
+    #         if (T_temp[i] >= scenetstart) and (T_temp[i] <= scenetend):
+    #             vec = StateVector()
+    #             vec.setTime(T_temp[i])
+    #             vec.setPosition(pos_smooth[i])
+    #             vec.setVelocity(vel_smooth[i])
+    #             frameOrbit.addStateVector(vec)
+        
+    #     fp.close()
+    #     return frameOrbit
+
     def extractOrbitFromAnnotation(self):
 
         '''
@@ -245,10 +385,9 @@ class Lutan1(Sensor):
 
         frameOrbit = Orbit()
         frameOrbit.setOrbitSource('Header')
-        margin = datetime.timedelta(seconds=1.0)
+        margin = datetime.timedelta(minutes=30.0)
         tstart = self.frame.getSensingStart() - margin
         tend = self.frame.getSensingStop() + margin
-
         for k in range(1,countNode):
             timestamp = self.convertToDateTime(node.find('stateVec[{}]/timeUTC'.format(k)).text)
             if (timestamp >= tstart) and (timestamp <= tend):

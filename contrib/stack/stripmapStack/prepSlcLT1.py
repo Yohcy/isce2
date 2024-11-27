@@ -12,19 +12,10 @@ import zipfile
 from uncompressFile import uncompressfile
 import xml.etree.ElementTree as ET
 
-<<<<<<< HEAD
-=======
-
->>>>>>> fa1748df79ddd256dd7ad31ddf31b20812d7c841
 EXAMPLE = """example:
   prepSlcLT1.py -i download -o SLC -orbit orbits
 """
 
-
-<<<<<<< HEAD
-=======
-
->>>>>>> fa1748df79ddd256dd7ad31ddf31b20812d7c841
 def createParser():
     '''
     Create command line parser.

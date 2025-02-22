@@ -196,7 +196,7 @@ class Lutan1(Sensor):
 
         # I based the margin on the data that I have.
         # Lutan-1 position and velocity sampling frequency is 1 Hz
-        margin = datetime.timedelta(seconds=30.0)
+        margin = datetime.timedelta(minutes=30.0)
         tstart = self.frame.getSensingStart() - margin
         tend = self.frame.getSensingStop() + margin
 
@@ -262,41 +262,150 @@ class Lutan1(Sensor):
         else:
             raise Exception("Unsupported orbit file extension: %s" % file_ext)
         return orb
+
+    def orbit_filter_iterative(self, time_seconds, pos_data, vel_data, n_key_points=5):
+        '''
+        轨道数据迭代滤波函数
+        参数:
+        time_seconds: 时间序列（相对于第一个点的秒数）
+        pos_data: 位置数据 shape=(n,3)
+        vel_data: 速度数据 shape=(n,3)
+        n_key_points: 关键点数量，默认5个
+        '''
+        time_array = np.array(time_seconds)
+        pos_array = np.array(pos_data)
+        vel_array = np.array(vel_data)
+        filtered_pos = pos_array.copy()
+        filtered_vel = vel_array.copy()
+        
+        for iteration in range(5):  # 进行5次迭代
+            # 选择均匀分布的关键点
+            n_points = len(time_array)
+            key_indices = np.linspace(0, n_points-1, n_key_points, dtype=int)
+            key_times = time_array[key_indices]
+            key_pos = filtered_pos[key_indices]
+            
+            # 对关键点进行多项式拟合
+            smoothed_pos = np.zeros_like(filtered_pos)
+            for i in range(3):  # x,y,z三个方向
+                # 位置使用3次多项式
+                poly_deg = 3
+                
+                # 先用关键点拟合一个初始多项式
+                coeffs = np.polyfit(key_times, key_pos[:,i], deg=poly_deg)
+                # 用初始多项式拟合所有点
+                smoothed_pos[:,i] = np.polyval(coeffs, time_array)
+                # 再次对所有点进行拟合
+                coeffs = np.polyfit(time_array, smoothed_pos[:,i], deg=poly_deg)
+                smoothed_pos[:,i] = np.polyval(coeffs, time_array)
+            
+            smoothed_vel = np.zeros_like(filtered_vel)
+            key_vel = filtered_vel[key_indices]
+            for i in range(3):
+                # 速度使用2次多项式
+                vel_poly_deg = 2
+                coeffs = np.polyfit(key_times, key_vel[:,i], deg=vel_poly_deg)
+                smoothed_vel[:,i] = np.polyval(coeffs, time_array)
+                coeffs = np.polyfit(time_array, smoothed_vel[:,i], deg=vel_poly_deg)
+                smoothed_vel[:,i] = np.polyval(coeffs, time_array)
+            
+            filtered_pos = smoothed_pos
+            filtered_vel = smoothed_vel
+        
+        # 将numpy数组转换为Python列表
+        return filtered_pos.tolist(), filtered_vel.tolist()
     
+    # def extractOrbitFromAnnotation(self):
+
+    #     '''
+    #     Extract orbit information from xml annotation
+    #     WARNING! Only use this method if orbit file is not available
+    #     '''
+
+    #     try:
+    #         fp = open(self.xml, 'r')
+    #     except IOError as strerr:
+    #         print("IOError: %s" % strerr)
+
+    #     _xml_root = ET.ElementTree(file=fp).getroot()
+    #     node = _xml_root.find('platform/orbit')
+    #     countNode = len(list(_xml_root.find('platform/orbit')))
+
+    #     frameOrbit = Orbit()
+    #     frameOrbit.setOrbitSource('Header')
+    #     margin = datetime.timedelta(minutes=30.0)
+    #     tstart = self.frame.getSensingStart() - margin
+    #     tend = self.frame.getSensingStop() + margin
+    #     for k in range(1,countNode):
+    #         timestamp = self.convertToDateTime(node.find('stateVec[{}]/timeUTC'.format(k)).text)
+    #         if (timestamp >= tstart) and (timestamp <= tend):
+    #             pos = [float(node.find('stateVec[{}]/posX'.format(k)).text), float(node.find('stateVec[{}]/posY'.format(k)).text), float(node.find('stateVec[{}]/posZ'.format(k)).text)]
+    #             vel = [float(node.find('stateVec[{}]/velX'.format(k)).text), float(node.find('stateVec[{}]/velY'.format(k)).text), float(node.find('stateVec[{}]/velZ'.format(k)).text)]
+
+    #             vec = StateVector()
+    #             vec.setTime(timestamp)
+    #             vec.setPosition(pos)
+    #             vec.setVelocity(vel)
+    #             frameOrbit.addStateVector(vec)
+        
+    #     fp.close()
+    #     return frameOrbit
     def extractOrbitFromAnnotation(self):
-
         '''
-        Extract orbit information from xml annotation
-        WARNING! Only use this method if orbit file is not available
+        从xml注释中提取轨道信息并进行滤波
+        如果没有精轨数据，使用此方法
         '''
-
         try:
             fp = open(self.xml, 'r')
         except IOError as strerr:
             print("IOError: %s" % strerr)
-
+    
         _xml_root = ET.ElementTree(file=fp).getroot()
         node = _xml_root.find('platform/orbit')
         countNode = len(list(_xml_root.find('platform/orbit')))
-
+    
         frameOrbit = Orbit()
         frameOrbit.setOrbitSource('Header')
         margin = datetime.timedelta(minutes=30.0)
         tstart = self.frame.getSensingStart() - margin
         tend = self.frame.getSensingStop() + margin
+        
+        # 收集所有轨道数据点
+        timestamps = []
+        positions = []
+        velocities = []
+        
         for k in range(1,countNode):
             timestamp = self.convertToDateTime(node.find('stateVec[{}]/timeUTC'.format(k)).text)
             if (timestamp >= tstart) and (timestamp <= tend):
-                pos = [float(node.find('stateVec[{}]/posX'.format(k)).text), float(node.find('stateVec[{}]/posY'.format(k)).text), float(node.find('stateVec[{}]/posZ'.format(k)).text)]
-                vel = [float(node.find('stateVec[{}]/velX'.format(k)).text), float(node.find('stateVec[{}]/velY'.format(k)).text), float(node.find('stateVec[{}]/velZ'.format(k)).text)]
-
-                vec = StateVector()
-                vec.setTime(timestamp)
-                vec.setPosition(pos)
-                vec.setVelocity(vel)
-                frameOrbit.addStateVector(vec)
+                pos = [float(node.find('stateVec[{}]/posX'.format(k)).text), 
+                      float(node.find('stateVec[{}]/posY'.format(k)).text), 
+                      float(node.find('stateVec[{}]/posZ'.format(k)).text)]
+                vel = [float(node.find('stateVec[{}]/velX'.format(k)).text), 
+                      float(node.find('stateVec[{}]/velY'.format(k)).text), 
+                      float(node.find('stateVec[{}]/velZ'.format(k)).text)]
+                
+                timestamps.append(timestamp)
+                positions.append(pos)
+                velocities.append(vel)
         
         fp.close()
+        
+        # 计算相对时间（秒）
+        time_seconds = [(t - timestamps[0]).total_seconds() for t in timestamps]
+        
+        # 进行轨道滤波
+        filtered_pos, filtered_vel = self.orbit_filter_iterative(time_seconds, positions, velocities)
+        
+        # 将滤波后的结果转换为轨道状态向量
+        for i, timestamp in enumerate(timestamps):
+            vec = StateVector()
+            vec.setTime(timestamp)
+            # 确保使用Python列表
+            vec.setPosition(filtered_pos[i])
+            vec.setVelocity(filtered_vel[i])
+            frameOrbit.addStateVector(vec)
+        
         return frameOrbit
     
     def extractImage(self):

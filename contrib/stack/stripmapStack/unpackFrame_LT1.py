@@ -68,7 +68,6 @@ def unpack(hdf5, slcname, deskew=False, polarization='HH', orbitfile=None):
     obj.extractImage()
     obj.frame.getImage().renderHdr()
 
-
     coeffs = obj.doppler_coeff
     dr = obj.frame.getInstrument().getRangePixelSize()
     r0 = obj.frame.getStartingRange()
@@ -82,7 +81,8 @@ def unpack(hdf5, slcname, deskew=False, polarization='HH', orbitfile=None):
     fpoly = Poly1D.Poly1D()
     fpoly.initPoly(order=1)
     fpoly.setCoeffs([0.0, 0.0])
-
+    dop = [0., 0., 0.]
+    obj.frame._dopplerVsPixel = dop
     if deskew:
         pickName = os.path.join(slcname, 'original')
     else:
@@ -91,7 +91,7 @@ def unpack(hdf5, slcname, deskew=False, polarization='HH', orbitfile=None):
         db['frame'] = obj.frame
         db['doppler'] = poly
         db['fmrate'] = fpoly
-
+    
     print("Doppler coefficients: ", poly._coeffs)
     print("FM rate coefficients: ", fpoly._coeffs)
     return obj
